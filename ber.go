@@ -28,7 +28,10 @@ func (s asn1Structured) EncodeTo(out *bytes.Buffer) error {
 	}
 	encodeIndent--
 	out.Write(s.tagBytes)
-	encodeLength(out, inner.Len())
+	if err := encodeLength(out, inner.Len()); err != nil {
+		return err
+	}
+
 	out.Write(inner.Bytes())
 	return nil
 }
@@ -65,7 +68,9 @@ func ber2der(ber []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	obj.EncodeTo(out)
+	if err = obj.EncodeTo(out); err != nil {
+		return nil, err
+	}
 
 	// if offset < len(ber) {
 	//	return nil, fmt.Errorf("ber2der: Content longer than expected. Got %d, expected %d", offset, len(ber))

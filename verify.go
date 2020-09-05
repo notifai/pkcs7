@@ -51,7 +51,9 @@ func verifySignature(p7 *PKCS7, signer signerInfo, truststore *x509.CertPool) (e
 			return err
 		}
 		h := hash.New()
-		h.Write(p7.Content)
+		if _, err = h.Write(p7.Content); err != nil {
+			return err
+		}
 		computed := h.Sum(nil)
 		if subtle.ConstantTimeCompare(digest, computed) != 1 {
 			return &MessageDigestMismatchError{
@@ -112,7 +114,9 @@ func (p7 *PKCS7) UnmarshalSignedAttribute(attributeType asn1.ObjectIdentifier, o
 
 func parseSignedData(data []byte) (*PKCS7, error) {
 	var sd signedData
-	asn1.Unmarshal(data, &sd)
+	if _, err := asn1.Unmarshal(data, &sd); err != nil {
+		return nil, err
+	}
 	certs, err := sd.Certificates.Parse()
 	if err != nil {
 		return nil, err

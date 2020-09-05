@@ -479,7 +479,7 @@ but that's not what ships are built for.
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(tmpContentFile.Name(), content, 0755)
+	_ = ioutil.WriteFile(tmpContentFile.Name(), content, 0755)
 	sigalgs := []x509.SignatureAlgorithm{
 		x509.SHA1WithRSA,
 		x509.SHA256WithRSA,
@@ -510,8 +510,8 @@ but that's not what ships are built for.
 			if err != nil {
 				t.Fatal(err)
 			}
-			pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: interCert.Certificate.Raw})
-			fd.Close()
+			_ = pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: interCert.Certificate.Raw})
+			_ = fd.Close()
 			for _, sigalgsigner := range sigalgs {
 				signerCert, err := createTestCertificateByIssuer("PKCS7 Test Signer Cert", interCert, sigalgsigner, false)
 				if err != nil {
@@ -527,8 +527,8 @@ but that's not what ships are built for.
 				if err != nil {
 					t.Fatal(err)
 				}
-				pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: signerCert.Certificate.Raw})
-				fd.Close()
+				_ = pem.Encode(fd, &pem.Block{Type: "CERTIFICATE", Bytes: signerCert.Certificate.Raw})
+				_ = fd.Close()
 
 				// write the signer key to a temp file
 				tmpSignerKeyFile, err := ioutil.TempFile("", "TestSignWithOpenSSLAndVerify_key")
@@ -544,15 +544,15 @@ but that's not what ships are built for.
 				switch priv := priv.(type) {
 				case *rsa.PrivateKey:
 					derKey = x509.MarshalPKCS1PrivateKey(priv)
-					pem.Encode(fd, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: derKey})
+					_ = pem.Encode(fd, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: derKey})
 				case *ecdsa.PrivateKey:
 					derKey, err = x509.MarshalECPrivateKey(priv)
 					if err != nil {
 						t.Fatal(err)
 					}
-					pem.Encode(fd, &pem.Block{Type: "EC PRIVATE KEY", Bytes: derKey})
+					_ = pem.Encode(fd, &pem.Block{Type: "EC PRIVATE KEY", Bytes: derKey})
 				}
-				fd.Close()
+				_ = fd.Close()
 
 				// write the root cert to a temp file
 				tmpSignedFile, err := ioutil.TempFile("", "TestSignWithOpenSSLAndVerify_signature")
@@ -610,13 +610,13 @@ but that's not what ships are built for.
 				if chains[0][2].Subject.CommonName != "PKCS7 Test Root CA" {
 					t.Fatalf("Expected to find root certificate with subject 'PKCS7 Test Root CA', but found '%s'", chains[0][2].Subject.CommonName)
 				}
-				os.Remove(tmpSignerCertFile.Name()) // clean up
-				os.Remove(tmpSignerKeyFile.Name())  // clean up
+				_ = os.Remove(tmpSignerCertFile.Name()) // clean up
+				_ = os.Remove(tmpSignerKeyFile.Name())  // clean up
 			}
-			os.Remove(tmpInterCertFile.Name()) // clean up
+			_ = os.Remove(tmpInterCertFile.Name()) // clean up
 		}
 	}
-	os.Remove(tmpContentFile.Name()) // clean up
+	_ = os.Remove(tmpContentFile.Name()) // clean up
 }
 
 func TestDSASignWithOpenSSLAndVerify(t *testing.T) {
@@ -629,21 +629,21 @@ but that's not what ships are built for.
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(tmpContentFile.Name(), content, 0755)
+	_ = ioutil.WriteFile(tmpContentFile.Name(), content, 0755)
 
 	// write the signer cert to a temp file
 	tmpSignerCertFile, err := ioutil.TempFile("", "TestDSASignWithOpenSSLAndVerify_signer")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(tmpSignerCertFile.Name(), dsaPublicCert, 0755)
+	_ = ioutil.WriteFile(tmpSignerCertFile.Name(), dsaPublicCert, 0755)
 
 	// write the signer key to a temp file
 	tmpSignerKeyFile, err := ioutil.TempFile("", "TestDSASignWithOpenSSLAndVerify_key")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(tmpSignerKeyFile.Name(), dsaPrivateKey, 0755)
+	_ = ioutil.WriteFile(tmpSignerKeyFile.Name(), dsaPrivateKey, 0755)
 
 	tmpSignedFile, err := ioutil.TempFile("", "TestDSASignWithOpenSSLAndVerify_signature")
 	if err != nil {
@@ -676,9 +676,9 @@ but that's not what ships are built for.
 	if err := p7.Verify(); err != nil {
 		t.Fatalf("Verify failed with error: %v", err)
 	}
-	os.Remove(tmpSignerCertFile.Name()) // clean up
-	os.Remove(tmpSignerKeyFile.Name())  // clean up
-	os.Remove(tmpContentFile.Name())    // clean up
+	_ = os.Remove(tmpSignerCertFile.Name()) // clean up
+	_ = os.Remove(tmpSignerKeyFile.Name())  // clean up
+	_ = os.Remove(tmpContentFile.Name())    // clean up
 }
 
 var dsaPrivateKey = []byte(`-----BEGIN PRIVATE KEY-----

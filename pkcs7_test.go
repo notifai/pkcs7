@@ -290,7 +290,7 @@ func createTestCertificateByIssuer(name string, issuer *certKeyPair, sigAlg x509
 	if err != nil {
 		return nil, err
 	}
-	pem.Encode(os.Stdout, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+	_ = pem.Encode(os.Stdout, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
 	return &certKeyPair{
 		Certificate: cert,
 		PrivateKey:  &priv,

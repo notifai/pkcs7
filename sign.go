@@ -83,7 +83,10 @@ func marshalAttributes(attrs []attribute) ([]byte, error) {
 
 	// Remove the leading sequence octets
 	var raw asn1.RawValue
-	asn1.Unmarshal(encodedAttributes, &raw)
+	if _, err = asn1.Unmarshal(encodedAttributes, &raw); err != nil {
+		return nil, err
+	}
+
 	return raw.Bytes, nil
 }
 
@@ -150,7 +153,10 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 		return err
 	}
 	h := hash.New()
-	h.Write(sd.data)
+	if _, err = h.Write(sd.data); err != nil {
+		return err
+	}
+
 	sd.messageDigest = h.Sum(nil)
 	encryptionOid, err := getOIDForEncryptionAlgorithm(pkey, sd.digestOid)
 	if err != nil {
@@ -204,7 +210,7 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 // This function is needed to sign old Android APKs, something you probably
 // shouldn't do unless you're maintaining backward compatibility for old
 // applications.
-func (sd *SignedData) SignWithoutAttr(ee *x509.Certificate, pkey crypto.PrivateKey, config SignerInfoConfig) error {
+func (sd *SignedData) SignWithoutAttr(ee *x509.Certificate, pkey crypto.PrivateKey, _ SignerInfoConfig) error {
 	var signature []byte
 	sd.sd.DigestAlgorithmIdentifiers = append(sd.sd.DigestAlgorithmIdentifiers, pkix.AlgorithmIdentifier{Algorithm: sd.digestOid})
 	hash, err := getHashForOID(sd.digestOid)
@@ -212,7 +218,10 @@ func (sd *SignedData) SignWithoutAttr(ee *x509.Certificate, pkey crypto.PrivateK
 		return err
 	}
 	h := hash.New()
-	h.Write(sd.data)
+	if _, err = h.Write(sd.data); err != nil {
+		return err
+	}
+
 	sd.messageDigest = h.Sum(nil)
 	switch pkey := pkey.(type) {
 	case *dsa.PrivateKey:
@@ -357,7 +366,9 @@ func signAttributes(attrs []attribute, pkey crypto.PrivateKey, digestAlg crypto.
 		return nil, err
 	}
 	h := digestAlg.New()
-	h.Write(attrBytes)
+	if _, err = h.Write(attrBytes); err != nil {
+		return nil, err
+	}
 	hash := h.Sum(nil)
 
 	// dsa doesn't implement crypto.Signer so we make a special case
