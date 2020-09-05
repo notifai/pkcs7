@@ -153,7 +153,7 @@ func getOIDForEncryptionAlgorithm(pkey crypto.PrivateKey, OIDDigestAlg asn1.Obje
 			case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA512):
 				return OIDDigestAlgorithmECDSASHA512, nil
 			}
-		case ed25519.PrivateKey:
+		case ed25519.PublicKey:
 			return OIDEncryptionAlgorithmEd25519, nil
 		}
 	case *dsa.PrivateKey:
