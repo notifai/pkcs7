@@ -53,9 +53,9 @@ type signedData struct {
 	Version                    int                        `asn1:"default:1"`
 	DigestAlgorithmIdentifiers []pkix.AlgorithmIdentifier `asn1:"set"`
 	ContentInfo                contentInfo
-	Certificates               rawCertificates        `asn1:"optional,tag:0"`
-	CRLs                       []pkix.CertificateList `asn1:"optional,tag:1"`
-	SignerInfos                []signerInfo           `asn1:"set"`
+	Certificates               rawCertificates `asn1:"optional,tag:0"`
+	RevocationInfoChoices      []asn1.RawValue `asn1:"optional,set,tag:1"`
+	SignerInfos                []signerInfo    `asn1:"set"`
 }
 
 type signerInfo struct {
@@ -128,10 +128,10 @@ func (sd *SignedData) AddSigner(ee *x509.Certificate, pkey crypto.PrivateKey, co
 // The signature algorithm used to hash the data is the one of the end-entity
 // certificate.
 func (sd *SignedData) AddSignerChain(ee *x509.Certificate, pkey crypto.PrivateKey, parents []*x509.Certificate, config SignerInfoConfig) error {
-// Following RFC 2315, 9.2 SignerInfo type, the distinguished name of
-// the issuer of the end-entity signer is stored in the issuerAndSerialNumber
-// section of the SignedData.SignerInfo, alongside the serial number of
-// the end-entity.
+	// Following RFC 2315, 9.2 SignerInfo type, the distinguished name of
+	// the issuer of the end-entity signer is stored in the issuerAndSerialNumber
+	// section of the SignedData.SignerInfo, alongside the serial number of
+	// the end-entity.
 	var ias issuerAndSerial
 	ias.SerialNumber = ee.SerialNumber
 	if len(parents) == 0 {
@@ -158,7 +158,11 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 	}
 
 	sd.messageDigest = h.Sum(nil)
-	encryptionOid, err := getOIDForEncryptionAlgorithm(pkey, sd.digestOid)
+	if sd.encryptionOid == nil {
+		// if the encryption algorithm wasn't set by SetEncryptionAlgorithm,
+		// infer it from the digest algorithm
+		sd.encryptionOid, err = getOIDForEncryptionAlgorithm(pkey, sd.digestOid)
+	}
 	if err != nil {
 		return err
 	}
@@ -190,7 +194,7 @@ func (sd *SignedData) AddSignerChain(ee *x509.Certificate, pkey crypto.PrivateKe
 		AuthenticatedAttributes:   finalAttrs,
 		UnauthenticatedAttributes: finalUnsignedAttrs,
 		DigestAlgorithm:           pkix.AlgorithmIdentifier{Algorithm: sd.digestOid},
-		DigestEncryptionAlgorithm: pkix.AlgorithmIdentifier{Algorithm: encryptionOid},
+		DigestEncryptionAlgorithm: pkix.AlgorithmIdentifier{Algorithm: sd.encryptionOid},
 		IssuerAndSerialNumber:     ias,
 		EncryptedDigest:           signature,
 		Version:                   1,
@@ -426,10 +430,10 @@ func DegenerateCertificate(cert []byte) ([]byte, error) {
 	}
 	emptyContent := contentInfo{ContentType: OIDData}
 	sd := signedData{
-		Version:      1,
-		ContentInfo:  emptyContent,
-		Certificates: rawCert,
-		CRLs:         []pkix.CertificateList{},
+		Version:               1,
+		ContentInfo:           emptyContent,
+		Certificates:          rawCert,
+		RevocationInfoChoices: []asn1.RawValue{},
 	}
 	content, err := asn1.Marshal(sd)
 	if err != nil {

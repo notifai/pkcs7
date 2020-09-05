@@ -8,6 +8,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
+	_ "crypto/sha1" // for crypto.SHA1
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -15,16 +16,18 @@ import (
 	"fmt"
 	"sort"
 
-	_ "crypto/sha1" // for crypto.SHA1
+	"golang.org/x/crypto/ocsp"
 )
 
 // PKCS7 Represents a PKCS7 structure
 type PKCS7 struct {
-	Content      []byte
-	Certificates []*x509.Certificate
-	CRLs         []pkix.CertificateList
-	Signers      []signerInfo
-	raw          interface{}
+	Content          []byte
+	Certificates     []*x509.Certificate
+	CRLs             []pkix.CertificateList
+	OCSPResponses    []ocsp.Response
+	RawOCSPResponses [][]byte
+	Signers          []signerInfo
+	raw              interface{}
 }
 
 type contentInfo struct {
@@ -82,6 +85,8 @@ var (
 	OIDEncryptionAlgorithmAES128GCM  = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 1, 6}
 	OIDEncryptionAlgorithmAES128CBC  = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 1, 2}
 	OIDEncryptionAlgorithmAES256GCM  = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 1, 46}
+
+	OIDOCSP = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 48, 1, 1}
 )
 
 func getHashForOID(oid asn1.ObjectIdentifier) (crypto.Hash, error) {
@@ -119,37 +124,40 @@ func getDigestOIDForSignatureAlgorithm(digestAlg x509.SignatureAlgorithm) (asn1.
 // getOIDForEncryptionAlgorithm takes the private key type of the signer and
 // the OID of a digest algorithm to return the appropriate signerInfo.DigestEncryptionAlgorithm
 func getOIDForEncryptionAlgorithm(pkey crypto.PrivateKey, OIDDigestAlg asn1.ObjectIdentifier) (asn1.ObjectIdentifier, error) {
-	switch pkey.(type) {
-	case *rsa.PrivateKey:
-		switch {
-		default:
-			return OIDEncryptionAlgorithmRSA, nil
-		case OIDDigestAlg.Equal(OIDEncryptionAlgorithmRSA):
-			return OIDEncryptionAlgorithmRSA, nil
-		case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA1):
-			return OIDEncryptionAlgorithmRSASHA1, nil
-		case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA256):
-			return OIDEncryptionAlgorithmRSASHA256, nil
-		case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA384):
-			return OIDEncryptionAlgorithmRSASHA384, nil
-		case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA512):
-			return OIDEncryptionAlgorithmRSASHA512, nil
-		}
-	case *ecdsa.PrivateKey:
-		switch {
-		case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA1):
-			return OIDDigestAlgorithmECDSASHA1, nil
-		case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA256):
-			return OIDDigestAlgorithmECDSASHA256, nil
-		case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA384):
-			return OIDDigestAlgorithmECDSASHA384, nil
-		case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA512):
-			return OIDDigestAlgorithmECDSASHA512, nil
+	switch key := pkey.(type) {
+	case crypto.Signer:
+		switch key.Public().(type) {
+		case *rsa.PublicKey, rsa.PublicKey:
+			switch {
+			default:
+				return OIDEncryptionAlgorithmRSA, nil
+			case OIDDigestAlg.Equal(OIDEncryptionAlgorithmRSA):
+				return OIDEncryptionAlgorithmRSA, nil
+			case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA1):
+				return OIDEncryptionAlgorithmRSASHA1, nil
+			case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA256):
+				return OIDEncryptionAlgorithmRSASHA256, nil
+			case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA384):
+				return OIDEncryptionAlgorithmRSASHA384, nil
+			case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA512):
+				return OIDEncryptionAlgorithmRSASHA512, nil
+			}
+		case *ecdsa.PublicKey, ecdsa.PublicKey:
+			switch {
+			case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA1):
+				return OIDDigestAlgorithmECDSASHA1, nil
+			case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA256):
+				return OIDDigestAlgorithmECDSASHA256, nil
+			case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA384):
+				return OIDDigestAlgorithmECDSASHA384, nil
+			case OIDDigestAlg.Equal(OIDDigestAlgorithmSHA512):
+				return OIDDigestAlgorithmECDSASHA512, nil
+			}
+		case ed25519.PrivateKey:
+			return OIDEncryptionAlgorithmEd25519, nil
 		}
 	case *dsa.PrivateKey:
 		return OIDDigestAlgorithmDSA, nil
-	case ed25519.PrivateKey:
-		return OIDEncryptionAlgorithmEd25519, nil
 	}
 	return nil, fmt.Errorf("pkcs7: cannot convert encryption algorithm to oid, unknown private key type %T", pkey)
 
@@ -182,6 +190,36 @@ func Parse(data []byte) (p7 *PKCS7, err error) {
 		return parseEnvelopedData(info.Content.Bytes)
 	case info.ContentType.Equal(OIDEncryptedData):
 		return parseEncryptedData(info.Content.Bytes)
+	}
+	return nil, ErrUnsupportedContentType
+}
+
+// Parse decodes a DER encoded PKCS7 package without a Content Type
+func ParseRawData(ContentType asn1.ObjectIdentifier, data []byte) (p7 *PKCS7, err error) {
+	if len(data) == 0 {
+		return nil, errors.New("pkcs7: input data is empty")
+	}
+
+	var info asn1.RawValue
+	der, err := ber2der(data)
+	if err != nil {
+		return nil, err
+	}
+	rest, err := asn1.Unmarshal(der, &info)
+	if len(rest) > 0 {
+		err = asn1.SyntaxError{Msg: "trailing data"}
+		return
+	} else if err != nil {
+		return
+	}
+
+	switch {
+	case ContentType.Equal(OIDSignedData):
+		return parseSignedData(info.Bytes)
+	case ContentType.Equal(OIDEnvelopedData):
+		return parseEnvelopedData(info.Bytes)
+	case ContentType.Equal(OIDEncryptedData):
+		return parseEncryptedData(info.Bytes)
 	}
 	return nil, ErrUnsupportedContentType
 }

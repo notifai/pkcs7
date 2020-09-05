@@ -52,7 +52,9 @@ func (p asn1Primitive) EncodeTo(out *bytes.Buffer) error {
 	}
 	//fmt.Printf("%s--> tag: % X length: %d\n", strings.Repeat("| ", encodeIndent), p.tagBytes, p.length)
 	//fmt.Printf("%s--> content length: %d\n", strings.Repeat("| ", encodeIndent), len(p.content))
-	out.Write(p.content)
+	if _, err = out.Write(p.content); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -180,7 +182,7 @@ func readObject(ber []byte, offset int) (asn1Object, int, error) {
 	if offset > berLen {
 		return nil, 0, errors.New("ber2der: cannot move offset forward, end of ber data reached")
 	}
-	hack := 0
+	indefinite := false
 	if l > 0x80 {
 		numberOfBytes := (int)(l & 0x7F)
 		if numberOfBytes > 4 { // int is only guaranteed to be 32bit
@@ -202,14 +204,7 @@ func readObject(ber []byte, offset int) (asn1Object, int, error) {
 			}
 		}
 	} else if l == 0x80 {
-		// find length by searching content
-		markerIndex := bytes.LastIndex(ber[offset:], []byte{0x0, 0x0})
-		if markerIndex == -1 {
-			return nil, 0, errors.New("ber2der: Invalid BER format")
-		}
-		length = markerIndex
-		hack = 2
-		debugprint("--> (compute length) marker found at offset: %d\n", markerIndex+offset)
+		indefinite = true
 	} else {
 		length = (int)(l)
 	}
@@ -224,6 +219,11 @@ func readObject(ber []byte, offset int) (asn1Object, int, error) {
 	debugprint("--> content start : %d\n", offset)
 	debugprint("--> content end   : %d\n", contentEnd)
 	debugprint("--> content       : % X\n", ber[offset:contentEnd])
+
+	if indefinite && kind == 0 {
+		return nil, 0, errors.New("ber2der: Indefinite form tag must have constructed encoding")
+	}
+
 	var obj asn1Object
 	if kind == 0 {
 		obj = asn1Primitive{
@@ -233,14 +233,25 @@ func readObject(ber []byte, offset int) (asn1Object, int, error) {
 		}
 	} else {
 		var subObjects []asn1Object
-		for offset < contentEnd {
+		for (offset < contentEnd) || indefinite {
 			var subObj asn1Object
 			var err error
-			subObj, offset, err = readObject(ber[:contentEnd], offset)
+			subObj, offset, err = readObject(ber, offset)
 			if err != nil {
 				return nil, 0, err
 			}
 			subObjects = append(subObjects, subObj)
+
+			if indefinite {
+				terminated, err := isIndefiniteTermination(ber, offset)
+				if err != nil {
+					return nil, 0, err
+				}
+
+				if terminated {
+					break
+				}
+			}
 		}
 		obj = asn1Structured{
 			tagBytes: ber[tagStart:tagEnd],
@@ -248,7 +259,20 @@ func readObject(ber []byte, offset int) (asn1Object, int, error) {
 		}
 	}
 
-	return obj, contentEnd + hack, nil
+	// Apply indefinite form length with 0x0000 terminator.
+	if indefinite {
+		contentEnd = offset + 2
+	}
+
+	return obj, contentEnd, nil
+}
+
+func isIndefiniteTermination(ber []byte, offset int) (bool, error) {
+	if len(ber)-offset < 2 {
+		return false, errors.New("ber2der: Invalid BER format")
+	}
+
+	return bytes.Index(ber[offset:], []byte{0x0, 0x0}) == 0, nil
 }
 
 func debugprint(format string, a ...interface{}) {
